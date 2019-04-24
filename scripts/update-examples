@@ -15,6 +15,8 @@ const {
 const PgSimplifyInflectorPlugin = require("@graphile-contrib/pg-simplify-inflector");
 const lowerCase = require("lodash/lowerCase");
 
+const PgConnectionString = process.env.PG_CONN || "";
+
 function upperFirst(str) {
   return str[0].toUpperCase() + str.substr(1);
 }
@@ -76,10 +78,10 @@ async function spawn(command, args, options = {}, stdin = null) {
   });
 }
 
-async function psql(flags, sql) {
+async function psql(conn, flags, sql) {
   return spawn(
     "psql",
-    ["-X", "-1", "-v", "ON_ERROR_STOP=1", ...flags],
+    [conn, "-X", "-1", "-v", "ON_ERROR_STOP=1", ...flags],
     {},
     sql
   );
@@ -87,7 +89,7 @@ async function psql(flags, sql) {
 
 async function tryPsql(flags, sql) {
   try {
-    return await psql(flags, sql);
+    return await psql(PgConnectionString, flags, sql);
   } catch (e) {
     // NOOP
   }
@@ -101,14 +103,15 @@ async function main() {
     "https://raw.githubusercontent.com/graphile/examples/master/db/999_data.sql"
   )).text();
   try {
-    await spawn("dropdb", ["graphile_org_demo"]);
+    await tryPsql(["template1",  "-c"], `DROP DATABASE graphile_org_demo`);
+    // await spawn("dropdb", ["graphile_org_demo"]);
   } catch (e) {
     /* non-existence is fine */
   }
 
   const password = String(Math.random());
   await tryPsql(
-    ["template1"],
+    ["template1", "-c"],
     `CREATE ROLE graphiledemo WITH LOGIN PASSWORD '${password}' SUPERUSER`
   );
   await tryPsql(
@@ -121,7 +124,10 @@ async function main() {
     `GRANT graphiledemo_visitor TO graphiledemo_authenticator;`
   );
 
-  await spawn("createdb", ["-O", "graphiledemo", "graphile_org_demo"]);
+  // await spawn("createdb", ["-O", "graphiledemo", "graphile_org_demo"]);
+  await tryPsql(["template1", "-c"], `CREATE DATABASE graphiledemo`);
+  await tryPsql(["template1", "-c"], `CREATE DATABASE graphile_org_demo`);
+  await psql()
   await psql(["graphile_org_demo"], schemaSql);
   await psql(["graphile_org_demo"], dataSql);
   await psql(
@@ -163,7 +169,7 @@ insert into quiz (name) values ('Cats'), ('Dogs'), ('Snakes');
 `
   );
   const pgPool = new pg.Pool({
-    connectionString: "postgres:///graphile_org_demo",
+    connectionString: `$(PgConnectionString)/graphile_org_demo`,
   });
   const getPostGraphileSchemaWithOptions = (options = {}, client = pgPool) =>
     createPostGraphileSchema(client, ["app_public"], {
